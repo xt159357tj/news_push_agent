@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     llm_tools_format: str = "flat"
     agent_max_steps: int = 12
     agent_timeout_seconds: float = 120.0
+    # bash 工具默认关闭；设为 true 才允许执行白名单内的只读命令
+    bash_enabled: bool = False
 
     news_provider: str = "rss"
     request_timeout_seconds: float = 15.0

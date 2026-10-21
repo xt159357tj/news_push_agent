@@ -152,6 +152,27 @@ EMBEDDING_DIMENSIONS_ENABLED=false   # 网关拒绝 dimensions 字段时保持 f
 新闻工具：`collect_rss`（采集并写入语料）/ `search_news`（混合检索）/ `fetch_article`（提取正文）。
 工具调用顺序完全由 LLM 决定（`app/agent/runtime.py`），代码不写死流程。
 
+### bash 工具
+
+默认关闭，需在 `.env` 中显式启用：
+
+```env
+BASH_ENABLED=false   # 改成 true 才允许执行
+```
+
+启用后也只能执行以下只读命令：
+
+- `ls [-a|-l] [dir]`、`pwd`、`date`、`echo ...`
+- `whoami`
+- `git status [--short]`
+- `python --version` / `python3 --version`
+
+安全约束：
+
+- 命令先用 `shlex` 拆分，再用 `create_subprocess_exec` 执行，**不经过 shell**；
+- 含 `;` `&&` `|` `>` `` ` `` `$` 等 shell 元字符的输入直接拒绝，因此 `ls; rm -rf /` 这类串联命令无法执行；
+- 命令执行超时 10 秒；输出截断（stdout 8000 / stderr 2000 字符）。
+
 ## 项目结构
 
 ```text

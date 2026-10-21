@@ -72,7 +72,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Execute a shell command (only when explicitly enabled).",
+            "description": "Execute one allowlisted read-only command (ls, pwd, whoami, date, echo, git status, python --version). No pipes, redirects or chaining; disabled unless BASH_ENABLED=true.",
             "parameters": {
                 "type": "object",
                 "properties": {"command": {"type": "string"}},
@@ -135,7 +135,7 @@ _HANDLERS: dict[str, ToolFn] = {
     "read_file": fs_tools.read_file,
     "search_content": fs_tools.search_content,
     "write_file": fs_tools.write_file,
-    "bash": lambda command: shell_tool.bash(command, enabled=False),
+    "bash": shell_tool.bash,
     "collect_rss": news_tools.collect_rss,
     "search_news": news_tools.search_news,
     "fetch_article": news_tools.fetch_article,
