@@ -85,15 +85,6 @@ uvicorn app.main:app --reload
 3. 在对话框里说「立即生成简报」，等待 Agent 检索并整理（可能耗时数十秒）；
 4. 说「查看历史简报」或「打开第 2 份」回看以前的简报。
 
-### 5. 跑测试（可选）
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-测试使用独立 SQLite（data/e2e_test.db），不依赖本地 MySQL，也不发真实网络请求。
-
 ---
 
 ## 对话助手
