@@ -80,10 +80,10 @@ uvicorn app.main:app --reload
 
 打开 http://127.0.0.1:8000 ：
 
-1. 填写昵称、邮箱、时区，保存身份；
-2. 设置关注话题/关键词、简报时间，保存订阅；
-3. 点击「立即生成简报」，等待 Agent 检索并整理（可能耗时数十秒）；
-4. 在「历史简报」中查看结果。
+1. 点击右上角「登录信息」，填写昵称、邮箱、时区并保存；
+2. 点击「订阅偏好」设置关注话题/关键词，点击「推送时间」选择每日推送时间；
+3. 在对话框里说「立即生成简报」，等待 Agent 检索并整理（可能耗时数十秒）；
+4. 说「查看历史简报」或「打开第 2 份」回看以前的简报。
 
 ### 5. 跑测试（可选）
 
@@ -95,6 +95,33 @@ pytest
 测试使用独立 SQLite（data/e2e_test.db），不依赖本地 MySQL，也不发真实网络请求。
 
 ---
+
+## 对话助手
+
+整个页面就是一个聊天界面。只有「登录信息」「推送时间」「订阅偏好」三项通过顶部按钮设置，
+其余功能（生成简报、查看历史简报、检索新闻、读写 workspace 文件）都直接对话完成：
+
+| 你说 | Agent 可能调用 |
+| --- | --- |
+| 立即生成简报 | `get_settings` + `generate_digest` |
+| 查看历史简报 / 打开第 2 份 | `list_digests` / `get_digest` |
+| 我现在的订阅设置是什么 | `get_settings` |
+| 列出 workspace 里的文件 | `list_dir` |
+| 看看 brief_2026-10-20.json 的内容 | `read_file` |
+| 在 workspace 里找 Claude | `search_content` |
+| 把这段内容写到 notes.txt | `write_file` |
+| 搜索最近的 Claude 新闻 | `collect_rss` + `search_news` |
+| 运行 git status | `bash`（需 `BASH_ENABLED=true`） |
+
+接口：
+
+```text
+POST /api/chat                     # { "message": "...", "session_id": "default" }
+GET  /api/chat/history?session_id=default
+```
+
+对话记录保存在 MySQL 的 `chat_messages` 表（按 `session_id` 区分，保留 `tool_trace` 以便回看本轮调用了哪些工具）。
+每次最多把最近 20 条消息带给模型。
 
 ## 定时生成
 
@@ -150,6 +177,8 @@ EMBEDDING_DIMENSIONS_ENABLED=false   # 网关拒绝 dimensions 字段时保持 f
 
 基础工具：`list_dir` / `read_file` / `search_content` / `write_file` / `bash`（默认禁用）。
 新闻工具：`collect_rss`（采集并写入语料）/ `search_news`（混合检索）/ `fetch_article`（提取正文）。
+简报工具：`get_settings`（读取登录信息与订阅偏好）/ `generate_digest`（按订阅偏好立即生成并保存）/
+`list_digests`（历史简报列表）/ `get_digest`（按 id 查看简报详情）。
 工具调用顺序完全由 LLM 决定（`app/agent/runtime.py`），代码不写死流程。
 
 ### bash 工具
@@ -177,13 +206,13 @@ BASH_ENABLED=false   # 改成 true 才允许执行
 
 ```text
 app/
-  api/            # FastAPI 路由（profile / subscriptions / digests）
+  api/            # FastAPI 路由（profile / subscriptions / digests / chat）
   agent/          # Agent Runtime、提示词、输出 Schema
   retrieval/      # 混合检索：embedder / faiss_store / bm25 / hybrid
   services/       # 调度器、任务执行、投递、简报服务
   tools/          # 工具注册表与实现
   db/             # SQLAlchemy 模型与会话
-sql/schema.sql    # MySQL 建表脚本
+sql/schema.sql    # MySQL 建表脚本（含 chat_messages）
 tests/            # pytest 测试（工具/检索/调度/投递/e2e）
 ```
 

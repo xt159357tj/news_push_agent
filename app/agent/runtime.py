@@ -8,12 +8,17 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.prompts import CHAT_SYSTEM_PROMPT, SYSTEM_PROMPT
 from app.agent.schemas import DigestOut
 from app.config import settings
 from app.tools import registry
 
 logger = logging.getLogger(__name__)
+
+# How many past chat turns to send back to the model.
+_CHAT_HISTORY_LIMIT = 20
+# How much of a tool result to keep in the JSON trace returned to the UI.
+_TRACE_RESULT_CHARS = 600
 
 
 @dataclass
@@ -35,11 +40,21 @@ class AgentResult:
     output_text: str = ""
 
 
+@dataclass
+class ChatResult:
+    text: str
+    steps: int
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    error: str = ""
+
+
 class AgentRuntime:
     """Drives an LLM function-calling loop where the model picks tool calls.
 
-    Uses the Chat Completions API (broadly compatible with OpenAI / DeepSeek /
-    other OpenAI-compatible providers) so tool calling works everywhere.
+    Two entry points share the same loop:
+
+    - ``run(AgentRequest)``: daily digest generation, expects a JSON digest.
+    - ``run_chat(history)``: interactive chat, returns plain text.
     """
 
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
@@ -48,10 +63,47 @@ class AgentRuntime:
             api_key=settings.llm_api_key,
         )
 
+    # ----- public entry points -----------------------------------------
     async def run(self, request: AgentRequest, audit: dict | None = None) -> AgentResult:
-        messages: list[dict[str, Any]] = self._build_messages(request)
+        messages = self._build_messages(request)
+        text, steps, tool_trace, error = await self._run_loop(messages, audit=audit)
+        if text is None:
+            return AgentResult(None, steps, len(tool_trace), error)
+        return AgentResult(self._parse_final(text), steps, len(tool_trace), text)
+
+    async def run_chat(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        user_name: str = "",
+        timezone: str = "Asia/Shanghai",
+        audit: dict | None = None,
+    ) -> ChatResult:
+        messages = self._build_chat_messages(history, user_name=user_name, timezone=timezone)
+        text, steps, tool_trace, error = await self._run_loop(messages, audit=audit)
+        if text is None:
+            reply = error
+        elif not text.strip():
+            reply = "（模型没有返回内容，请重试）"
+        else:
+            reply = text
+        return ChatResult(
+            text=reply,
+            steps=steps,
+            tool_calls=tool_trace,
+            error=error,
+        )
+
+    # ----- core loop ----------------------------------------------------
+    async def _run_loop(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        audit: dict | None = None,
+    ) -> tuple[str | None, int, list[dict[str, Any]], str]:
+        """Run the tool loop. Returns (final_text, steps, tool_trace, error)."""
         steps = 0
-        tool_calls = 0
+        tool_trace: list[dict[str, Any]] = []
 
         while steps < settings.agent_max_steps:
             steps += 1
@@ -66,20 +118,18 @@ class AgentRuntime:
                     timeout=settings.agent_timeout_seconds,
                 )
             except asyncio.TimeoutError as exc:
-                return AgentResult(None, steps, tool_calls, f"LLM timeout: {exc}")
+                return None, steps, tool_trace, f"LLM timeout: {exc}"
             except Exception as exc:  # noqa: BLE001
                 logger.exception("LLM call failed")
-                return AgentResult(None, steps, tool_calls, f"LLM error: {exc}")
+                return None, steps, tool_trace, f"LLM error: {exc}"
 
             message = response.choices[0].message
             text = message.content or ""
             tool_calls_list = message.tool_calls or []
 
             if not tool_calls_list:
-                return AgentResult(self._parse_final(text), steps, tool_calls, text)
+                return text, steps, tool_trace, ""
 
-            # Append the assistant message with tool_calls so the provider has
-            # the full conversation context, then append tool results.
             messages.append(
                 {
                     "role": "assistant",
@@ -99,13 +149,20 @@ class AgentRuntime:
             )
 
             for tc in tool_calls_list:
-                tool_calls += 1
                 name = tc.function.name
                 try:
                     arguments = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     arguments = {}
                 result = await registry.execute(name, arguments, audit=audit)
+                tool_trace.append(
+                    {
+                        "name": name,
+                        "arguments": arguments,
+                        "ok": bool(result.get("ok", False)),
+                        "result": _summarize_result(result),
+                    }
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -114,8 +171,9 @@ class AgentRuntime:
                     }
                 )
 
-        return AgentResult(None, steps, tool_calls, "Exceeded max steps")
+        return None, steps, tool_trace, "Exceeded max steps"
 
+    # ----- message builders --------------------------------------------
     def _build_messages(self, request: AgentRequest) -> list[dict[str, Any]]:
         user_prompt = (
             f"用户：{request.user_name}（时区 {request.timezone}）\n"
@@ -131,23 +189,40 @@ class AgentRuntime:
             {"role": "user", "content": user_prompt},
         ]
 
+    def _build_chat_messages(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        user_name: str,
+        timezone: str,
+    ) -> list[dict[str, Any]]:
+        context = (
+            f"当前用户：{user_name or '访客'}；时区：{timezone or 'Asia/Shanghai'}。"
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": f"{CHAT_SYSTEM_PROMPT}\n{context}"}
+        ]
+        for item in history[-_CHAT_HISTORY_LIMIT:]:
+            role = item.get("role")
+            content = item.get("content") or ""
+            if role in {"user", "assistant"} and content:
+                messages.append({"role": role, "content": content})
+        return messages
+
     def _parse_final(self, text: str) -> DigestOut | None:
         """Parse the model's final JSON into DigestOut (tolerating code fences)."""
         import re
 
         cleaned = text.strip()
-        # Strip markdown code fences if present.
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
             cleaned = re.sub(r"\s*```$", "", cleaned)
         cleaned = cleaned.strip()
 
         data = None
-        # Try full-text JSON first.
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
-            # Fallback: extract the first balanced {...} block.
             start = cleaned.find("{")
             if start != -1:
                 depth = 0
@@ -173,3 +248,8 @@ class AgentRuntime:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Digest validation failed: %s", exc)
             return None
+
+
+def _summarize_result(result: dict[str, Any]) -> str:
+    text = json.dumps(result, ensure_ascii=False)
+    return text if len(text) <= _TRACE_RESULT_CHARS else text[:_TRACE_RESULT_CHARS] + "…"

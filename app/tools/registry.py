@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from pydantic import ValidationError
 
-from app.tools import fs_tools, news_tools, shell_tool
+from app.tools import digest_tools, fs_tools, news_tools, shell_tool
 
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
 
@@ -128,6 +128,45 @@ SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_settings",
+            "description": "Get the user's saved profile (name, email, timezone) and subscription preferences (topics, keywords, language, max_items, delivery_time).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_digest",
+            "description": "Generate today's news digest now from the saved subscription preferences and save it to history. Takes tens of seconds. Returns the digest with items.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_digests",
+            "description": "List recent saved digests (id, title, overview, generated_at), newest first.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 10}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_digest",
+            "description": "Get one saved digest by id, including every item (title, summary, reason, url).",
+            "parameters": {
+                "type": "object",
+                "properties": {"digest_id": {"type": "integer"}},
+                "required": ["digest_id"],
+            },
+        },
+    },
 ]
 
 _HANDLERS: dict[str, ToolFn] = {
@@ -139,6 +178,10 @@ _HANDLERS: dict[str, ToolFn] = {
     "collect_rss": news_tools.collect_rss,
     "search_news": news_tools.search_news,
     "fetch_article": news_tools.fetch_article,
+    "get_settings": digest_tools.get_settings,
+    "generate_digest": digest_tools.generate_digest,
+    "list_digests": digest_tools.list_digests,
+    "get_digest": digest_tools.get_digest,
 }
 
 

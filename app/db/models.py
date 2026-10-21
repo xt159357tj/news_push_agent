@@ -194,3 +194,17 @@ class ToolAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+
+class ChatMessage(Base):
+    """对话模式的消息记录（单会话 MVP，按 session_id 区分）。"""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text, default="")
+    # 本轮助手回复中触发的工具调用（JSON 字符串），便于前端展示
+    tool_trace: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -157,4 +157,21 @@ CREATE TABLE tool_audit_logs (
     CONSTRAINT fk_audit_job FOREIGN KEY (job_id) REFERENCES generation_jobs (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------------------
+-- 对话记录（对话模式）
+-- ------------------------------------------------------------
+CREATE TABLE chat_messages (
+    id         INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    user_id    INT UNSIGNED  NOT NULL,
+    session_id VARCHAR(64)   NOT NULL DEFAULT 'default',
+    role       VARCHAR(16)   NOT NULL,           -- user | assistant
+    content    TEXT          NOT NULL,
+    tool_trace TEXT          NOT NULL,           -- JSON: 本轮工具调用
+    created_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_chat_messages_user_id (user_id),
+    KEY idx_chat_messages_session_id (session_id),
+    CONSTRAINT fk_chat_messages_user FOREIGN KEY (user_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

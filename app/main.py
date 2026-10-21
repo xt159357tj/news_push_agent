@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.api import digests, profile, subscriptions
+from app.api import chat, digests, profile, subscriptions
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine
@@ -35,6 +35,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(profile.router)
 app.include_router(subscriptions.router)
 app.include_router(digests.router)
+app.include_router(chat.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
